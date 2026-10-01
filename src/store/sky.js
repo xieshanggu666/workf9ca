@@ -15,7 +15,11 @@ export const useSkyStore = defineStore('sky', {
     // 进行中（可中断续看）的比赛记录
     activeRace: s => s.state?.activeRace || null,
     // 历史比赛（已结算，可回放）
-    raceHistory: s => s.state?.races || []
+    raceHistory: s => s.state?.races || [],
+    // 飞艇租赁：在租租约 / 市场目录 / 最近归还结算记录
+    rental: s => s.state?.rental || null,
+    rentalMarket: s => s.state?.rentalMarket || [],
+    rentalHistory: s => s.state?.rentalHistory || []
   },
   actions: {
     async init() { this.state = await j('/api/state'); this.loaded = true },
@@ -23,8 +27,12 @@ export const useSkyStore = defineStore('sky', {
     tip(msg) { this.toast = msg; setTimeout(() => this.toast = '', 2600) },
     // 下单只提交商品 id；价格、属性与加成一律由服务端按商品配置核定
     async shop(id) { const r = await post('/api/shop', { id }); await this.refresh(); if (!r.ok) this.tip(r.msg); return r },
-    async equip(id) { await post('/api/equip/' + id); await this.refresh() },
-    async unequip(id) { await post('/api/unequip/' + id); await this.refresh() },
+    async equip(id) { const r = await post('/api/equip/' + id); await this.refresh(); if (r && !r.ok) this.tip(r.msg) },
+    async unequip(id) { const r = await post('/api/unequip/' + id); await this.refresh(); if (r && !r.ok) this.tip(r.msg) },
+    // 飞艇租赁：签约只传市场配置 id，押金/租金/场次/磨损单价由服务端核定并快照
+    async rentShip(id) { const r = await post('/api/rentals/rent/' + id); await this.refresh(); this.tip(r.msg); return r },
+    // 归还结算：幂等，重复调用返回同一份结算结果，不会重复扣退款
+    async returnRental() { const r = await post('/api/rentals/return'); await this.refresh(); this.tip(r.msg); return r },
     async hirePilot() { const r = await post('/api/hire_pilot'); await this.refresh(); this.tip(r.msg) },
     async hireMech() { const r = await post('/api/hire_mech'); await this.refresh(); this.tip(r.msg) },
     async train(id) { const r = await post('/api/train', { id }); await this.refresh(); if (r.ok) this.tip(r.msg); else this.tip(r.msg) },

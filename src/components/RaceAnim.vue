@@ -143,7 +143,9 @@ onUnmounted(() => { if (raf) cancelAnimationFrame(raf) })
         <span class="fx-chip" v-for="(s, i) in rec.segments" :key="s.key" :class="{ on: i === curSeg }">
           {{ s.name }} 天气<em>×{{ player.segW[i] }}</em>
         </span>
-        <span class="fx-chip">🔩 部件健康 <em>{{ rec.factors.parts_dur }}%</em></span>
+        <span class="fx-chip">🔩 {{ rec.factors.ship?.rental ? '租赁艇况' : '部件健康' }} <em>{{ rec.factors.parts_dur }}%</em></span>
+        <span v-if="rec.factors.ship?.rental" class="fx-chip rent">🛟 租赁艇 · {{ rec.factors.ship.rental.name }}</span>
+        <span v-else class="fx-chip">🛸 {{ rec.factors.ship?.name || '自有飞艇' }}</span>
         <span class="fx-chip">🧑‍✈️ {{ rec.factors.pilot ? rec.factors.pilot.name : '无机师' }}</span>
         <span class="fx-chip">🔧 {{ rec.factors.mech ? rec.factors.mech.name : '无技工' }}</span>
         <span class="fx-more">{{ showFactors ? '收起 ▲' : '影响明细 ▼' }}</span>
@@ -225,10 +227,11 @@ onUnmounted(() => { if (raf) cancelAnimationFrame(raf) })
           <div class="s-title">第 {{ result.rank }} 名</div>
           <div class="s-row"><span>积分</span><b>+{{ result.pts }}</b></div>
           <div class="s-row"><span>奖金</span><b>+¥{{ result.money }}</b></div>
-          <div class="s-row"><span>部件磨损</span><b style="color:#ff9fb0">-{{ result.wear }}</b></div>
+          <div class="s-row"><span>{{ rec.factors.ship?.rental ? '租赁艇磨损' : '部件磨损' }}</span><b style="color:#ff9fb0">-{{ result.wear }}</b></div>
           <div class="s-row"><span>声望</span><b>+{{ result.repGain }}</b></div>
           <div class="s-row"><span>总用时</span><b>{{ player.total.toFixed(2) }}s</b></div>
-          <div v-if="isLive" class="s-note">奖励已一次性结算到车队账户</div>
+          <div v-if="isLive && rec.factors.ship?.rental" class="s-note">磨损已记入租约，归还租赁艇时统一结算</div>
+          <div v-else-if="isLive" class="s-note">奖励已一次性结算到车队账户</div>
           <button class="btn primary s-btn" @click="goBack">{{ isLive ? '返回航线 ▶' : '返回 ✕' }}</button>
           <button v-if="!isLive" class="btn ghost s-btn" @click="replay">↻ 重新回放</button>
         </div>

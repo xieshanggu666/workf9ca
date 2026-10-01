@@ -73,6 +73,8 @@ input:focus { border-color: var(--gold); }
 }
 .chipx .ic { font-style: normal; }
 .chipx.gold { background: rgba(255, 215, 106, .15); border-color: rgba(255, 215, 106, .4); color: var(--gold); }
+.chipx.rent { background: rgba(126, 203, 255, .13); border-color: rgba(126, 203, 255, .45); color: var(--sky); }
+.chipx.rent.warn { background: rgba(255, 159, 176, .15); border-color: rgba(255, 159, 176, .5); color: var(--rose); }
 
 /* 主场景 */
 .mains { width: 100%; height: 100%; position: relative; }
@@ -153,6 +155,7 @@ input:focus { border-color: var(--gold); }
 }
 .fx-chip em { font-style: normal; color: var(--mint); margin-left: 3px; }
 .fx-chip.on { color: var(--gold); background: rgba(255,215,106,.14); border-color: rgba(255,215,106,.5); }
+.fx-chip.rent { color: var(--sky); background: rgba(126,203,255,.12); border-color: rgba(126,203,255,.4); }
 .fx-more { margin-left: auto; font-size: 11px; color: var(--muted); }
 .factor-detail {
   margin-top: 9px; padding: 12px 14px; border-radius: 13px; display: flex; flex-direction: column; gap: 9px;
@@ -297,6 +300,23 @@ input:focus { border-color: var(--gold); }
 .up-ico { font-size: 24px; }
 .up-name { font-weight: 700; font-size: 13px; }
 .up-stat { font-size: 12px; color: var(--mint); }
+
+/* 飞艇租赁 */
+.rental-active { padding: 14px; border-radius: 15px; background: rgba(255,215,106,.07); border: 1px solid rgba(255,215,106,.4); display: flex; flex-direction: column; gap: 10px; }
+.ra-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ra-terms { font-size: 12px; color: var(--muted); }
+.ra-settle { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border-radius: 12px; background: rgba(12,14,42,.35); }
+.ra-row { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: var(--muted); }
+.ra-row.total { padding-top: 6px; border-top: 1px dashed var(--line); color: var(--text); font-weight: 700; }
+.ra-row .ok { color: var(--mint); }
+.ra-row .low, .mono.low { color: var(--rose); }
+.ra-warn { font-size: 12px; color: var(--rose); text-align: center; }
+.rt-stats { display: flex; gap: 7px; font-size: 11px; color: var(--sky); flex-wrap: wrap; }
+.rt-terms { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.rt-history { margin-top: 11px; display: flex; flex-direction: column; gap: 7px; }
+.rt-his-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 11px; background: var(--glass); border: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.rt-his-row .ok { color: var(--mint); }
+.rt-his-row .low { color: var(--rose); }
 
 .crew-list { display: flex; flex-direction: column; gap: 9px; }
 .crew-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: var(--glass); border: 1px solid var(--line); }

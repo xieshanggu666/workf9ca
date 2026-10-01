@@ -37,6 +37,9 @@ function openTrophy() { drawer.value = drawer.value === 'trophy' ? '' : 'trophy'
         <span class="chipx"><b class="ic">🪙</b> ¥{{ store.team.money?.toLocaleString() }}</span>
         <span class="chipx"><b class="ic">✨</b> 声望 {{ store.team.rep }}</span>
         <span class="chipx gold"><b class="ic">🏅</b> 积分 {{ store.team.season_pts }}</span>
+        <span v-if="store.rental" class="chipx rent" :class="{ warn: !store.rental.races_left }" :title="`租赁艇「${store.rental.name}」· 租约剩余 ${store.rental.races_left} 场`">
+          <b class="ic">🛟</b> {{ store.rental.name }} · 剩 {{ store.rental.races_left }} 场
+        </span>
         <span class="chipx"><b class="ic">🗼</b> {{ store.state ? store.state.seasonDone + ' / ' + store.state.seasonTotal + ' 站' : '' }}</span>
       </div>
     </header>

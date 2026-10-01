@@ -82,6 +82,28 @@ CREATE TABLE IF NOT EXISTS race_log (
   note TEXT,
   ts TEXT
 );
+-- 飞艇租赁：租约条款（押金/租金/场次/磨损单价）在签约时快照到行内，
+-- 归还结算只依据该行快照，配置后续调整不影响在租租约；status=active|returned
+CREATE TABLE IF NOT EXISTS rentals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ship_id INTEGER NOT NULL,        -- 租赁市场配置 id
+  name TEXT NOT NULL,
+  speed INTEGER NOT NULL,
+  turn INTEGER NOT NULL,
+  acc INTEGER NOT NULL,
+  dur INTEGER NOT NULL,
+  deposit INTEGER NOT NULL,        -- 押金：签约时从车队资金扣除
+  rent INTEGER NOT NULL,           -- 租金：归还结算时从押金中抵扣
+  races_total INTEGER NOT NULL,    -- 租约场次
+  races_left INTEGER NOT NULL,     -- 剩余场次（每场结算时 -1）
+  wear_unit INTEGER NOT NULL,      -- 磨损赔偿单价（每点艇况）
+  cond INTEGER NOT NULL DEFAULT 100,  -- 艇况：比赛磨损累积扣减
+  wear INTEGER NOT NULL DEFAULT 0,    -- 累计磨损（= 各场结算磨损之和）
+  status TEXT NOT NULL DEFAULT 'active',  -- active | returned
+  refund REAL,                     -- 归还结算净退额（押金-租金-磨损赔偿，可为负=补差价）
+  rent_fee REAL, wear_fee REAL, penalty REAL,  -- 结算明细（重度磨损附加赔偿）
+  created_at TEXT, returned_at TEXT
+);
 -- 比赛记录：动画 / 实时排名 / 最终奖励共用的唯一事实来源
 -- status=running 未完赛（可中断续看）；settled=1 已结算（奖励只发一次，可历史回放）
 CREATE TABLE IF NOT EXISTS races (
