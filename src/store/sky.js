@@ -15,7 +15,13 @@ export const useSkyStore = defineStore('sky', {
     // 进行中（可中断续看）的比赛记录
     activeRace: s => s.state?.activeRace || null,
     // 历史比赛（已结算，可回放）
-    raceHistory: s => s.state?.races || []
+    raceHistory: s => s.state?.races || [],
+    // 当前生效的租约（null = 自有艇出赛）
+    rental: s => s.state?.rental || null,
+    // 租赁艇型目录（性能/押金/租金/场次/费率均为服务端配置）
+    rentalShop: s => s.state?.rentalShop || [],
+    // 最近归还结算记录
+    rentalHistory: s => s.state?.rentalHistory || []
   },
   actions: {
     async init() { this.state = await j('/api/state'); this.loaded = true },
@@ -29,6 +35,10 @@ export const useSkyStore = defineStore('sky', {
     async hireMech() { const r = await post('/api/hire_mech'); await this.refresh(); this.tip(r.msg) },
     async train(id) { const r = await post('/api/train', { id }); await this.refresh(); if (r.ok) this.tip(r.msg); else this.tip(r.msg) },
     async maintain() { const r = await post('/api/maintain'); await this.refresh(); if (!r.ok) this.tip(r.msg); else this.tip('维护完成，耗资 ' + r.cost) },
+    // 签约租艇：只提交艇型 id；押金/租金/性能由服务端按目录核定，签约即扣款
+    async rentShip(id) { const r = await post('/api/rentals/rent', { id }); await this.refresh(); if (!r.ok) this.tip(r.msg); return r },
+    // 归还租艇：按租约结算磨损费并退还押金；幂等，重复调用只结算一次
+    async returnShip() { const r = await post('/api/rentals/return'); await this.refresh(); this.tip(r.msg); return r },
     // 开赛：生成完整比赛记录（分段过程+奖励已定）；已有 running 记录时返回同一份用于续看
     async startRace(cid) { return await post('/api/races/start/' + cid) },
     // 上报观赛进度（中断续看锚点）

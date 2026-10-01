@@ -71,6 +71,24 @@ for (const it of SHOP_ITEMS) {
   if (!ok) throw new Error('[SKY] 商店商品配置非法：' + JSON.stringify(it))
 }
 
+/* ================= 飞艇租赁：艇型目录（服务端唯一事实来源） =================
+ * 与商店同口径：客户端只能按 id 签约；性能、押金、租金、租约场次与磨损费率一律以这份
+ * 配置为准，请求体夹带的任何价格/性能字段都不被采信。押金+租金在签约时一次扣除，
+ * 归还时按「累计磨损 × 磨损费率」从押金中结算退款（租金不退）。
+ */
+const RENTAL_SHIPS = [
+  { id: 1, name: '雨燕·轻竞技', speed: 66, turn: 62, acc: 72, dur: 64, deposit: 2400, rent: 600, maxRaces: 2, wearRate: 35 },
+  { id: 2, name: '猎鹰·巡航者', speed: 76, turn: 72, acc: 74, dur: 80, deposit: 4500, rent: 1200, maxRaces: 3, wearRate: 50 },
+  { id: 3, name: '雷霆·竞速型', speed: 88, turn: 76, acc: 88, dur: 70, deposit: 7200, rent: 2000, maxRaces: 3, wearRate: 65 },
+  { id: 4, name: '星凰·旗舰', speed: 97, turn: 91, acc: 93, dur: 90, deposit: 11000, rent: 3200, maxRaces: 4, wearRate: 85 }
+]
+const RENTAL_MAP = new Map(RENTAL_SHIPS.map(s => [s.id, s]))
+for (const s of RENTAL_SHIPS) {
+  const ok = ['speed', 'turn', 'acc', 'dur', 'deposit', 'rent', 'maxRaces', 'wearRate']
+    .every(k => Number.isInteger(s[k]) && s[k] > 0) && typeof s.name === 'string' && s.name.trim()
+  if (!ok) throw new Error('[SKY] 租赁艇型配置非法：' + JSON.stringify(s))
+}
+
 function seed() {
   if (get('SELECT COUNT(*) c FROM team').c > 0) return
   run('INSERT INTO team (name) VALUES (?)', '苍穹疾风战队')
@@ -87,11 +105,16 @@ function seed() {
 }
 export function teamCore() { return get('SELECT * FROM team WHERE id=1') }
 export function airship() { return all('SELECT * FROM airships')[0] || { speed: 60, dur: 80, turn: 55, acc: 60, parts_dur: 100, hp: 100, name: '云雀·I', id: 1 } }
+// 当前生效的租约（每车队同时仅一份；null = 使用自有艇）
+function activeRental() { return get("SELECT * FROM rentals WHERE status='active' ORDER BY id DESC LIMIT 1") || null }
 export function fleetStats() {
-  const a = airship()
+  // 租约期间车队以租赁艇出赛：基础四项与部件健康取自租约快照，自有艇入库封存不磨损
+  const rt = activeRental()
+  const a = rt || airship()
   const up = all('SELECT * FROM upgrades WHERE equipped=1')
-  const s = { speed: a.speed, dur: a.dur, turn: a.turn, acc: a.acc, name: a.name, id: a.id, parts_dur: a.parts_dur, hp: a.hp }
+  const s = { speed: a.speed, dur: a.dur, turn: a.turn, acc: a.acc, name: a.name, id: a.id, parts_dur: a.parts_dur, hp: a.hp ?? 100 }
   up.forEach(u => { s[u.stat] = (s[u.stat] || 0) + u.bonus })
+  if (rt) s.rental = { id: rt.id, name: rt.name, racesLeft: rt.max_races - rt.races_used, maxRaces: rt.max_races, wearTotal: rt.wear_total }
   return s
 }
 function leadPilot() { return all('SELECT * FROM pilots ORDER BY (skill+courage) DESC')[0] || null }
@@ -211,6 +234,8 @@ function buildRace(c) {
         acc: st.acc - mods.filter(m => m.stat === 'acc').reduce((a, m) => a + m.bonus, 0),
         dur: st.dur - mods.filter(m => m.stat === 'dur').reduce((a, m) => a + m.bonus, 0) },
       parts_dur: st.parts_dur,
+      // 本场出赛租约快照：结算时磨损记入该租约；null = 自有艇出赛
+      rental: st.rental ? { id: st.rental.id, name: st.rental.name } : null,
       mods,
       pilot: pilot ? { id: pilot.id, name: pilot.name, skill: pilot.skill, courage: pilot.courage, exp: pilot.exp, mood: pilot.mood } : null,
       mech: mech ? { id: mech.id, name: mech.name, skill: mech.skill, mood: mech.mood } : null,
@@ -241,8 +266,17 @@ function raceEffect(row, c) {
 // 保证「资源状态」与「战绩」始终一致。维护等操作若已介入，恢复值以 100 为上限，不会溢出。
 function reverseSettledRace(row, c) {
   const g = raceEffect(row, c)
-  const a = airship()
-  run('UPDATE airships SET parts_dur=MIN(100,parts_dur+?), hp=MIN(100,hp+?) WHERE id=?', g.wear, g.wear, a.id)
+  const rtId = g.rec?.factors?.rental?.id
+  const rt = rtId ? get("SELECT * FROM rentals WHERE id=? AND status='active'", rtId) : null
+  if (rt) {
+    // 该场为租约艇出赛且租约仍在履行：磨损与已用场次一并回滚到租约（恢复以 100 为上限）
+    run('UPDATE rentals SET parts_dur=MIN(100,parts_dur+?), wear_total=MAX(0,wear_total-?), races_used=MAX(0,races_used-1) WHERE id=?',
+      g.wear, g.wear, rt.id)
+  } else if (!rtId) {
+    const a = airship()
+    run('UPDATE airships SET parts_dur=MIN(100,parts_dur+?), hp=MIN(100,hp+?) WHERE id=?', g.wear, g.wear, a.id)
+  }
+  // 租约已归还：磨损费已钱货两讫，不再回滚任何部件（自有艇本场也未磨损）
   const pilotId = g.rec?.factors?.pilot?.id
   if (pilotId) {
     const expGain = g.rank <= 4 ? 3 : 1   // 与 settleRace 的发奖口径逐字对应
@@ -280,9 +314,17 @@ function settleRace(id) {
         result = { ok: false, status: 409, msg: '前置赛站尚未完赛，该比赛暂不能结算' }
       } else {
         const { rank, pts, money, wear, repGain } = rec.result
-        const a = airship()
-        const newPd = Math.max(10, a.parts_dur - wear)
-        run('UPDATE airships SET parts_dur=?, hp=? WHERE id=?', newPd, Math.max(20, a.hp - wear), a.id)
+        const rtId = rec.factors.rental?.id
+        const rt = rtId ? get("SELECT * FROM rentals WHERE id=? AND status='active'", rtId) : null
+        if (rt) {
+          // 租约艇出赛：磨损记入租约（归还时按 wear_total 计费）并计一场次，自有艇不磨损
+          run('UPDATE rentals SET parts_dur=MAX(10,parts_dur-?), wear_total=wear_total+?, races_used=races_used+1 WHERE id=?',
+            wear, wear, rt.id)
+        } else {
+          const a = airship()
+          const newPd = Math.max(10, a.parts_dur - wear)
+          run('UPDATE airships SET parts_dur=?, hp=? WHERE id=?', newPd, Math.max(20, a.hp - wear), a.id)
+        }
         if (rec.factors.pilot) {
           run('UPDATE pilots SET exp=exp+?, mood=MIN(100,MAX(0,mood-?)) WHERE id=?',
             rank <= 4 ? 3 : 1, rank > 8 ? 6 : 2, rec.factors.pilot.id)
@@ -407,6 +449,10 @@ const payload = () => {
   return {
     team: t, airship: st, upgrades, pilots, mechanics, circuits, sponsors, log,
     shop: SHOP_ITEMS,
+    // 租赁：当前生效租约（null=自有艇出赛）、艇型目录与最近归还记录
+    rental: activeRental(),
+    rentalShop: RENTAL_SHIPS,
+    rentalHistory: all("SELECT * FROM rentals WHERE status='returned' ORDER BY id DESC LIMIT 5"),
     activeRace: parseRace(activeRow),
     races: raceRows.map(parseRace),
     seasonDone: done, seasonTotal: circuits.length
@@ -493,12 +539,99 @@ app.post('/api/train', (req, res) => {
 
 // 维护
 app.post('/api/maintain', (req, res) => {
+  // 租约期间租赁艇由出租方整备（磨损在归还时计费），自有艇封存，均不可自行维护
+  if (activeRental()) return res.json({ ok: false, msg: '租约期间飞艇由出租方整备，归还租艇后方可维护自有艇' })
   const t = teamCore(); const a = airship()
   const cost = Math.round((100 - a.parts_dur) * 25)
   if (cost < 200 || t.money < 200) return res.status(200).json({ ok: false, cost, msg: cost < 200 ? '部件状态良好，无需维护' : '资金不足' })
   run('UPDATE team SET money=money-? WHERE id=1', cost)
   run('UPDATE airships SET parts_dur=100, hp=100 WHERE id=?', a.id)
   res.json({ ok: true, cost })
+})
+
+/* ---------- 飞艇租赁：签约（扣押金+租金）/ 归还（按磨损结算退款，幂等） ---------- */
+
+// 租赁目录与当前租约（目录为服务端配置，客户端不可改写）
+app.get('/api/rentals', (_, res) => res.json({
+  ok: true,
+  items: RENTAL_SHIPS,
+  active: activeRental(),
+  history: all("SELECT * FROM rentals WHERE status='returned' ORDER BY id DESC LIMIT 5")
+}))
+
+// 签约租艇：客户端只提交艇型 id；押金、租金、性能与场次以服务端目录核定。
+// 同一事务（BEGIN IMMEDIATE）内完成「无在履租约 → 资金校验 → 扣款 → 建约」，
+// 并发/重复点击不会重复扣款或叠加多份租约。
+app.post('/api/rentals/rent', (req, res) => {
+  const rawId = req.body?.id
+  if (typeof rawId !== 'number' || !Number.isInteger(rawId) || rawId <= 0) {
+    return res.status(400).json({ ok: false, msg: '艇型编号无效' })
+  }
+  const cfg = RENTAL_MAP.get(rawId)
+  if (!cfg) return res.status(400).json({ ok: false, msg: '该艇型不存在' })
+
+  let result
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const cur = activeRental()
+    if (cur) {
+      result = { status: 409, body: { ok: false, msg: `已有进行中的租约《${cur.name}》，归还后方可再租` } }
+    } else if (get("SELECT id FROM races WHERE status='running' LIMIT 1")) {
+      // 比赛进行中签约会中途切换出赛艇，破坏比赛记录的唯一事实来源，一律拒绝
+      result = { status: 409, body: { ok: false, msg: '比赛进行中，完赛结算后方可签约租艇' } }
+    } else {
+      const t = teamCore()
+      const cost = cfg.deposit + cfg.rent
+      if (t.money < cost) {
+        result = { status: 400, body: { ok: false, msg: '资金不足，无法支付押金与租金', cost } }
+      } else {
+        run('UPDATE team SET money=money-? WHERE id=1', cost)
+        const r = run(`INSERT INTO rentals (ship_id,name,speed,turn,acc,dur,deposit,rent_fee,wear_rate,max_races,created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+          cfg.id, cfg.name, cfg.speed, cfg.turn, cfg.acc, cfg.dur, cfg.deposit, cfg.rent, cfg.wearRate, cfg.maxRaces, now())
+        result = { status: 200, body: { ok: true, msg: `已签约租用「${cfg.name}」（押金 ¥${cfg.deposit} + 租金 ¥${cfg.rent}）`, id: Number(r.lastInsertRowid) } }
+      }
+    }
+    db.exec('COMMIT')
+  } catch (e) {
+    db.exec('ROLLBACK')
+    console.error('[SKY] 租艇签约失败', e)
+    result = { status: 500, body: { ok: false, msg: '签约失败，请重试' } }
+  }
+  return res.status(result.status).json(result.body)
+})
+
+// 归还租艇：按租约结算——磨损费 = 累计磨损 × 费率，退款 = 押金 − 磨损费（下限 0）。
+// 以 status='active' 为唯一闸门（事务内判定并置 returned），重复请求/断线重放只结算一次；
+// 已归还时返回同一份结算结果（幂等），绝不二次退款。
+app.post('/api/rentals/return', (req, res) => {
+  let result
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const r = activeRental()
+    if (!r) {
+      const last = get("SELECT * FROM rentals WHERE status='returned' ORDER BY id DESC LIMIT 1")
+      if (last) {
+        result = { status: 200, body: { ok: true, already: true, msg: `租约《${last.name}》已结算归还，不会重复退款`, refund: last.refund, wearFee: last.wear_fee, name: last.name } }
+      } else {
+        result = { status: 400, body: { ok: false, msg: '当前没有进行中的租约' } }
+      }
+    } else if (get("SELECT id FROM races WHERE status='running' LIMIT 1")) {
+      result = { status: 409, body: { ok: false, msg: '比赛进行中，完赛结算后方可归还租艇' } }
+    } else {
+      const wearFee = r.wear_total * r.wear_rate
+      const refund = Math.max(0, r.deposit - wearFee)
+      run('UPDATE team SET money=money+? WHERE id=1', refund)
+      run("UPDATE rentals SET status='returned', wear_fee=?, refund=?, returned_at=? WHERE id=?", wearFee, refund, now(), r.id)
+      result = { status: 200, body: { ok: true, already: false, msg: `已归还「${r.name}」：磨损费 ¥${wearFee}，退还押金 ¥${refund}`, refund, wearFee, name: r.name } }
+    }
+    db.exec('COMMIT')
+  } catch (e) {
+    db.exec('ROLLBACK')
+    console.error('[SKY] 归还结算失败', e)
+    result = { status: 500, body: { ok: false, msg: '归还结算失败，请重试' } }
+  }
+  return res.status(result.status).json(result.body)
 })
 
 /* ---------- 分段比赛：开赛（生成记录）/ 续看 / 进度 / 结算（幂等） ---------- */
@@ -513,6 +646,11 @@ app.post('/api/races/start/:cid', (req, res) => {
   const c = get('SELECT * FROM circuits WHERE id=?', cid)
   if (!c) return res.json({ ok: false, msg: '该赛站不存在' })
   if (c.finished) return res.json({ ok: false, msg: '该站已完赛' })
+  // 租约联动：场次用尽的租约须先在机库归还结算，才能继续参赛（自有艇或再租）
+  const rt = activeRental()
+  if (rt && rt.races_used >= rt.max_races) {
+    return res.json({ ok: false, msg: `租约《${rt.name}》场次已用完（${rt.races_used}/${rt.max_races}），请先在机库归还租艇` })
+  }
   const cur = nextCircuit()
   if (!cur) return res.json({ ok: false, msg: '本赛季已全部完赛' })
   if (cur.id !== cid) {
@@ -558,7 +696,7 @@ app.post('/api/races/:id/settle', (req, res) => {
 
 // 重置（重置数据到初始种子）
 app.post('/api/reset', (_, res) => {
-  ['race_log', 'races', 'sponsors', 'circuits', 'upgrades', 'mechanics', 'pilots', 'airships', 'team'].forEach(t => { try { run(`DELETE FROM ${t}`) } catch (e) {} })
+  ['race_log', 'races', 'rentals', 'sponsors', 'circuits', 'upgrades', 'mechanics', 'pilots', 'airships', 'team'].forEach(t => { try { run(`DELETE FROM ${t}`) } catch (e) {} })
   try { run('DELETE FROM sqlite_sequence') } catch (e) {}
   seed()
   res.json({ ok: true })

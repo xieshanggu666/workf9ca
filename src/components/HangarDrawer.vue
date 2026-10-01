@@ -1,4 +1,5 @@
 <script setup>
+import { computed, ref } from 'vue'
 import { useSkyStore } from '@/store/sky'
 const store = useSkyStore()
 const emit = defineEmits(['close'])
@@ -13,6 +14,27 @@ const ownedCount = it => store.upgrades.filter(u =>
 async function buy(it) {
   const r = await store.shop(it.id)
   if (r?.ok) store.tip(r.msg || '购买成功')
+}
+
+/* ---------- 飞艇租赁 ---------- */
+const rental = computed(() => store.rental)
+// 归还结算预览：按当前累计磨损估算（最终以归还时服务端结算为准）
+const wearFeeNow = computed(() => rental.value ? rental.value.wear_total * rental.value.wear_rate : 0)
+const refundNow = computed(() => rental.value ? Math.max(0, rental.value.deposit - wearFeeNow.value) : 0)
+const renting = ref(false)
+async function rent(it) {
+  if (renting.value) return
+  renting.value = true
+  const r = await store.rentShip(it.id)
+  if (r?.ok) store.tip(r.msg)
+  renting.value = false
+}
+const returning = ref(false)
+async function returnShip() {
+  if (returning.value) return
+  returning.value = true
+  await store.returnShip()
+  returning.value = false
 }
 </script>
 
@@ -31,7 +53,9 @@ async function buy(it) {
             <div class="air-icon">🛸</div>
             <div>
               <b>{{ store.airship.name }}</b>
-              <div class="air-tag tag b">主力飞艇</div>
+              <div class="air-tag tag" :class="store.airship.rental ? 'rose' : 'b'">
+                {{ store.airship.rental ? `租赁中 · 剩 ${store.airship.rental.racesLeft} 场` : '主力飞艇' }}
+              </div>
             </div>
             <div class="air-health">
               <div class="ah-label">部件健康 <span class="mono" :class="{ low: store.airship.parts_dur < 40 }">{{ store.airship.parts_dur }}%</span></div>
@@ -45,8 +69,67 @@ async function buy(it) {
               <b class="mono">{{ p.v }}</b>
             </div>
           </div>
-          <button class="btn mint w-full" @click="store.maintain()">🔧 维护部件</button>
+          <button class="btn mint w-full" :disabled="!!store.airship.rental" @click="store.maintain()">
+            {{ store.airship.rental ? '🛟 租约艇由出租方整备' : '🔧 维护部件' }}
+          </button>
         </div>
+
+        <!-- 飞艇租赁：签约扣押金+租金，比赛磨损记入租约，归还时按磨损结算退款 -->
+        <section>
+          <div class="sec-h">
+            <b>🛟 飞艇租赁</b><span class="d-sub">押金+租金签约 · 归还按磨损结算</span>
+          </div>
+
+          <!-- 当前租约：履行状态与归还结算预览 -->
+          <div v-if="rental" class="rent-card active">
+            <div class="rent-top">
+              <b>{{ rental.name }}</b>
+              <span class="tag rose">租约履行中</span>
+            </div>
+            <div class="rent-rows">
+              <div class="rent-row"><span>剩余场次</span><b class="mono">{{ rental.max_races - rental.races_used }} / {{ rental.max_races }}</b></div>
+              <div class="rent-row"><span>部件健康</span><b class="mono" :class="{ low: rental.parts_dur < 40 }">{{ rental.parts_dur }}%</b></div>
+              <div class="rent-row"><span>累计磨损</span><b class="mono" style="color:var(--rose)">{{ rental.wear_total }} 点</b></div>
+              <div class="rent-row"><span>磨损费预估</span><b class="mono">¥{{ wearFeeNow.toLocaleString() }}</b></div>
+              <div class="rent-row"><span>预计退还押金</span><b class="mono" style="color:var(--mint)">¥{{ refundNow.toLocaleString() }}</b></div>
+            </div>
+            <button class="btn primary w-full" :disabled="returning" @click="returnShip">
+              🔁 归还结算（押金 ¥{{ rental.deposit.toLocaleString() }} − 磨损费）
+            </button>
+            <div class="rent-hint">场次用完后需归还租艇才能继续参赛</div>
+          </div>
+
+          <!-- 租赁目录：性能/押金/租金/场次/费率均为服务端核定 -->
+          <div v-else class="rent-list">
+            <div v-for="it in store.rentalShop" :key="it.id" class="rent-card">
+              <div class="rent-top">
+                <b>{{ it.name }}</b>
+                <span class="tag b">{{ it.maxRaces }} 场租约</span>
+              </div>
+              <div class="rent-perf">
+                <span v-for="([k, l]) in [['speed','速度'],['turn','转向'],['acc','加速'],['dur','耐久']]" :key="k" class="rp">
+                  {{ l }} <em class="mono">{{ it[k] }}</em>
+                </span>
+              </div>
+              <div class="rent-rows">
+                <div class="rent-row"><span>押金（归还时按磨损结算）</span><b class="mono">¥{{ it.deposit.toLocaleString() }}</b></div>
+                <div class="rent-row"><span>租金（不退）</span><b class="mono">¥{{ it.rent.toLocaleString() }}</b></div>
+                <div class="rent-row"><span>磨损费率</span><b class="mono">¥{{ it.wearRate }}/点</b></div>
+              </div>
+              <button class="btn sm primary w-full" :disabled="renting || store.team.money < it.deposit + it.rent" @click="rent(it)">
+                签约 ¥{{ (it.deposit + it.rent).toLocaleString() }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 最近归还结算记录 -->
+          <div v-if="store.rentalHistory.length" class="rent-history">
+            <div v-for="h in store.rentalHistory" :key="h.id" class="rent-his-row">
+              <span>{{ h.name }}</span>
+              <span class="mono">磨损费 ¥{{ h.wear_fee }} · 退 ¥{{ h.refund }}</span>
+            </div>
+          </div>
+        </section>
 
         <!-- 改装件道具 -->
         <section>

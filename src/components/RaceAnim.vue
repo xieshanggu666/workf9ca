@@ -144,6 +144,7 @@ onUnmounted(() => { if (raf) cancelAnimationFrame(raf) })
           {{ s.name }} 天气<em>×{{ player.segW[i] }}</em>
         </span>
         <span class="fx-chip">🔩 部件健康 <em>{{ rec.factors.parts_dur }}%</em></span>
+        <span class="fx-chip" v-if="rec.factors.rental">🛟 租约艇 <em>{{ rec.factors.rental.name }}</em></span>
         <span class="fx-chip">🧑‍✈️ {{ rec.factors.pilot ? rec.factors.pilot.name : '无机师' }}</span>
         <span class="fx-chip">🔧 {{ rec.factors.mech ? rec.factors.mech.name : '无技工' }}</span>
         <span class="fx-more">{{ showFactors ? '收起 ▲' : '影响明细 ▼' }}</span>
@@ -225,7 +226,10 @@ onUnmounted(() => { if (raf) cancelAnimationFrame(raf) })
           <div class="s-title">第 {{ result.rank }} 名</div>
           <div class="s-row"><span>积分</span><b>+{{ result.pts }}</b></div>
           <div class="s-row"><span>奖金</span><b>+¥{{ result.money }}</b></div>
-          <div class="s-row"><span>部件磨损</span><b style="color:#ff9fb0">-{{ result.wear }}</b></div>
+          <div class="s-row" v-if="rec.factors.rental">
+            <span>租艇磨损（{{ rec.factors.rental.name }}）</span><b style="color:#ff9fb0">-{{ result.wear }} · 记入租约</b>
+          </div>
+          <div class="s-row" v-else><span>部件磨损</span><b style="color:#ff9fb0">-{{ result.wear }}</b></div>
           <div class="s-row"><span>声望</span><b>+{{ result.repGain }}</b></div>
           <div class="s-row"><span>总用时</span><b>{{ player.total.toFixed(2) }}s</b></div>
           <div v-if="isLive" class="s-note">奖励已一次性结算到车队账户</div>
